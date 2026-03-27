@@ -1,0 +1,167 @@
+# Example DocETL Pipeline Template
+#
+# This template uses placeholders that are automatically replaced at runtime:
+#   {{INPUT_JSON}}       - Path to the generated input JSON file
+#   {{OUTPUT_FILE}}      - Path to the output JSON file
+#   {{INTERMEDIATE_DIR}} - Directory for intermediate processing files
+#
+# Usage:
+#   python main.py <input_folder> -p pipeline_template.yaml -o output.json
+
+from_docwrangler: true
+parsing_tools:
+  - name: docling_pdf_to_markdown
+    function_code: |
+      import os
+      from pathlib import Path
+      from threading import Lock
+
+      import huggingface_hub.file_download as hf_file_download
+      from docling.document_converter import DocumentConverter
+
+      _DOCLING_CONVERTER = None
+      _DOCLING_LOCK = Lock()
+      _ORIGINAL_SYMLINK = getattr(hf_file_download.os, "symlink", None)
+
+      if os.name == "nt" and _ORIGINAL_SYMLINK is not None:
+          def _safe_symlink(src, dst, *args, **kwargs):
+              try:
+                  return _ORIGINAL_SYMLINK(src, dst, *args, **kwargs)
+              except OSError as exc:
+                  if getattr(exc, "winerror", None) == 1314:
+                      raise PermissionError("Symlink privilege not available on Windows") from exc
+                  raise
+
+          hf_file_download.os.symlink = _safe_symlink
+
+      def docling_pdf_to_markdown(document, input_key="pdf_path", output_key="docling_markdown", strict_text=False):
+          global _DOCLING_CONVERTER
+          if input_key not in document:
+              raise ValueError(f"Input key {input_key} not found in item: {document}")
+
+          with _DOCLING_LOCK:
+              if _DOCLING_CONVERTER is None:
+                  _DOCLING_CONVERTER = DocumentConverter()
+
+              result = _DOCLING_CONVERTER.convert(Path(document[input_key]))
+          return [{output_key: result.document.export_to_markdown(strict_text=strict_text)}]
+
+datasets:
+  input:
+    type: file
+    path: {{INPUT_JSON}}
+    source: local
+    parsing:
+      - function: docling_pdf_to_markdown
+        input_key: pdf_path
+        output_key: docling_markdown
+
+default_model: openrouter/google/gemini-3-flash-preview
+optimizer_config:
+  rewrite_agent_model: gpt-5-nano
+
+operations:
+  - type: map
+    name: extract_document_profile
+    skip_on_error: true
+    prompt: |
+      You are extracting structured metadata from a document.
+
+      Source file: {{ input.filename }}
+
+      Document markdown:
+
+      {{ input.docling_markdown }}
+
+      Task:
+
+      Extract the following structured fields:
+
+      1) title
+      2) document_id
+      3) summary
+      4) keywords
+      5) entities
+
+      Extraction rules:
+
+      - Only use information explicitly present in the document.
+      - Do not guess missing values.
+      - For unknown scalar values, return null.
+      - For unknown list fields, return an empty list.
+      - Preserve wording as closely as possible when capturing keywords or entities.
+
+      Field requirements:
+
+      - title: best available document title
+      - document_id: DOI, report number, accession number, or another explicit identifier if present
+      - summary: concise 2-4 sentence summary grounded in the source text
+      - keywords: a list of key topics or phrases explicitly mentioned in the document
+      - entities: a list of objects with name, type, and provenance
+
+      Output rules:
+
+      - Provide the output strictly as structured data according to the schema.
+
+      - Include provenance in each entity so a reviewer can verify the extracted value.
+    output:
+      schema:
+        title: string
+        document_id: string
+        summary: string
+        keywords: 'list[string]'
+        entities: 'list[{name: string, type: string, provenance: string}]'
+    optimize: 'true'
+    num_retries_on_validate_failure: 2
+    model: openrouter/google/gemini-3-flash-preview
+  - type: map
+    name: normalize_document_profile
+    prompt: |
+      You are a data normalization assistant.
+
+      Input Data:
+
+      Title: {{ input.title }}
+
+      Document ID: {{ input.document_id }}
+
+      Summary: {{ input.summary }}
+
+      Keywords: {{ input.keywords }}
+
+      Entities: {{ input.entities }}
+
+      Task:
+
+      - Clean whitespace in string fields.
+      - Remove duplicate keywords while preserving order.
+      - Remove duplicate entities when both name and type are identical.
+      - Keep provenance text unchanged.
+    output:
+      schema:
+        title: string
+        document_id: string
+        summary: string
+        keywords: 'list[string]'
+        entities: 'list[{name: string, type: string, provenance: string}]'
+    input: extract_document_profile
+    model: openrouter/google/gemini-3-flash-preview
+
+pipeline:
+  steps:
+    - name: data_processing
+      input: input
+      operations:
+        - extract_document_profile
+        - normalize_document_profile
+
+  output:
+    type: file
+    path: {{OUTPUT_FILE}}
+    intermediate_dir: {{INTERMEDIATE_DIR}}
+
+system_prompt:
+  dataset_description: |
+    A set of PDF documents. Each item has a filename, a local PDF path, and Docling-generated markdown text.
+  persona: |
+    A meticulous document analyst who extracts structured information carefully, avoids unsupported assumptions, and preserves clear provenance.
