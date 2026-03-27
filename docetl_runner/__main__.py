@@ -16,6 +16,7 @@ from docetl_runner.discovery import (
     discover_pdf_files,
     validate_input_folder,
 )
+from docetl_runner.env import load_project_env
 from docetl_runner.excel import convert_json_to_excel
 from docetl_runner.log import setup_logging
 from docetl_runner.pipeline import resolve_template, run_pipeline, write_pipeline_yaml
@@ -25,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the full workflow and return an exit code."""
     args = parse_args(argv)
     logger = setup_logging(verbose=args.verbose)
+    env_path = load_project_env()
+    if env_path is not None:
+        logger.debug("Loaded environment variables from %s", env_path)
 
     input_folder = Path(args.input_folder)
     try:
