@@ -1,16 +1,43 @@
 """Centralized constants for the universal DocETL runner."""
 
+DEFAULT_EXIT_CODE_SUCCESS = 0
+DEFAULT_EXIT_CODE_FAILURE = 1
+DEFAULT_WINDOWS_UTF8_ENV_VARS: tuple[tuple[str, str], ...] = (
+    ("PYTHONUTF8", "1"),
+    ("PYTHONIOENCODING", "utf-8"),
+)
+
 DEFAULT_PRIMARY_METADATA_COLUMNS: tuple[str, ...] = (
     "filename",
     "document_id",
     "title",
 )
 
+DEFAULT_SUMMARY_FALLBACK_VALUE = "unknown"
+SUMMARY_SEPARATOR_WIDTH = 50
+SUMMARY_INTERMEDIATE_SUBDIR = "data_processing"
+
+CLI_EXAMPLE_INPUT_FOLDER = "input_docs"
+CLI_EXAMPLE_PIPELINE_TEMPLATE = "pipeline_template.yaml"
+CLI_DEFAULT_OUTPUT_TEMPLATE = "<input_folder>_output.json"
+CLI_BATCH_HELP_TEMPLATE = (
+    "Process PDFs in batches of this size to reduce peak memory usage "
+    "(default: process all PDFs at once)"
+)
+
 PDF_GLOB_PATTERN = "*.pdf"
 FILE_ENCODING = "utf-8"
+PATH_DISPLAY_SEPARATOR = "/"
 
 EXCEL_SHEET_NAME_MAX_LENGTH = 31
+EXCEL_CELL_MAX_LENGTH = 32767
 EXCEL_ENGINE = "openpyxl"
+EXCEL_TRUNCATION_SUFFIX = "... [truncated]"
+EXCEL_PROGRESS_DESCRIPTION = "[bold green]Extracting data"
+EXCEL_EXCLUDED_COLUMNS = frozenset({"docling_markdown"})
+EXCEL_ILLEGAL_CONTROL_CHAR_PATTERN = r"[\x00-\x08\x0B\x0C\x0E-\x1F]"
+EXCEL_XML_COMMENT_PATTERN = r"<!--.*?-->"
+EXCEL_INLINE_TAG_PATTERNS = (r"<image>", r"</image>")
 
 NULL_STRING = "null"
 
@@ -23,6 +50,40 @@ INPUT_JSON_SUFFIX = "_input.json"
 OUTPUT_JSON_SUFFIX = "_output.json"
 INTERMEDIATES_DIR_SUFFIX = "_intermediates"
 PIPELINE_YAML_SUFFIX = "_pipeline.yaml"
+BATCHES_DIR_NAME = "batches"
+BATCH_FILE_INFIX = "_batch_"
+INTERMEDIATE_DIR_SUFFIX = "_intermediate"
 
 INPUT_FIELD_FILENAME = "filename"
 INPUT_FIELD_PDF_PATH = "pdf_path"
+DOCLING_DEFAULT_INPUT_KEY = INPUT_FIELD_PDF_PATH
+DOCLING_DEFAULT_OUTPUT_KEY = "docling_markdown"
+DOCLING_DEFAULT_INTERMEDIATE_ROOT = "intermediate"
+DOCLING_INTERMEDIATE_PREFIX = "docling-pdf-"
+DOCLING_STAGING_DIR_NAME = "staged_inputs"
+DOCLING_PDF_DEFAULT_FILENAME = "document.pdf"
+DOCLING_SAFE_FILENAME_ALLOWED_CHARS = "._- ()"
+DOCLING_WINDOWS_SYMLINK_PERMISSION_WINERROR = 1314
+DOCLING_THREADS_ENV_VAR = "DOCETL_RUNNER_DOCLING_THREADS"
+DOCLING_DEFAULT_THREADS = 8
+
+SUMMARY_INPUT_COUNT_KEY = "count"
+SUMMARY_INPUT_DOCUMENTS_KEY = "documents"
+SUMMARY_OUTPUT_EMPTY_COUNT_KEY = "empty_count"
+SUMMARY_OUTPUT_EMPTY_DOCUMENTS_KEY = "empty_documents"
+SUMMARY_OUTPUT_RECORD_COUNT_KEY = "count"
+SUMMARY_OUTPUT_NESTED_COUNTS_KEY = "nested_counts"
+SUMMARY_INTERMEDIATE_COUNT_KEY = "count"
+SUMMARY_INTERMEDIATE_PATH_KEY = "path"
+
+SUMMARY_TITLE_INPUT = "Input Documents"
+SUMMARY_TITLE_OUTPUT = "Extracted Nested Data"
+SUMMARY_TITLE_EMPTY = "Documents with No Extracted Data"
+SUMMARY_TITLE_INTERMEDIATE = "Intermediate Processing Results"
+SUMMARY_TITLE_PANEL = "DocETL Pipeline Execution Summary"
+SUMMARY_TITLE_COMPLETE = "Summary Complete"
+SUMMARY_OUTPUT_TYPE_LABEL = "Field"
+SUMMARY_OUTPUT_COUNT_LABEL = "Count"
+SUMMARY_MESSAGE_ALL_HAVE_DATA = "All documents produced extracted data"
+
+PIPELINE_PROGRESS_DESCRIPTION = "[bold blue]Running pipeline…"

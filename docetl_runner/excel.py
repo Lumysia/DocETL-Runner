@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,15 @@ from rich.progress import (
 
 from docetl_runner.constants import (
     DEFAULT_PRIMARY_METADATA_COLUMNS,
+    EXCEL_CELL_MAX_LENGTH,
     EXCEL_ENGINE,
+    EXCEL_EXCLUDED_COLUMNS,
+    EXCEL_ILLEGAL_CONTROL_CHAR_PATTERN,
+    EXCEL_INLINE_TAG_PATTERNS,
+    EXCEL_PROGRESS_DESCRIPTION,
     EXCEL_SHEET_NAME_MAX_LENGTH,
+    EXCEL_TRUNCATION_SUFFIX,
+    EXCEL_XML_COMMENT_PATTERN,
     FILE_ENCODING,
     NULL_STRING,
 )
@@ -30,6 +38,34 @@ def _clean_value(value: Any) -> Any:
     if value == NULL_STRING:
         return None
     return value
+
+
+def _sanitize_for_excel(value: Any) -> Any:
+    """Sanitize a value to be safe for Excel export.
+
+    Removes or replaces illegal characters that openpyxl cannot handle,
+    such as control characters and certain HTML/XML markers.
+
+    Args:
+        value: The value to sanitize.
+
+    Returns:
+        A sanitized version of the value safe for Excel export.
+    """
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        return value
+
+    cleaned = re.sub(EXCEL_ILLEGAL_CONTROL_CHAR_PATTERN, "", value)
+    cleaned = re.sub(EXCEL_XML_COMMENT_PATTERN, "", cleaned, flags=re.DOTALL)
+    for pattern in EXCEL_INLINE_TAG_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned)
+    if len(cleaned) > EXCEL_CELL_MAX_LENGTH:
+        cleaned = cleaned[:EXCEL_CELL_MAX_LENGTH] + EXCEL_TRUNCATION_SUFFIX
+
+    return cleaned
 
 
 def _parse_nested_items(raw: Any) -> list[dict[str, Any]]:
@@ -56,11 +92,13 @@ def _extract_scalar_metadata(record: dict[str, Any]) -> dict[str, Any]:
     """Extract top-level scalar metadata fields from a record."""
     metadata: dict[str, Any] = {}
     for key, value in record.items():
+        if key in EXCEL_EXCLUDED_COLUMNS:
+            continue
         if _parse_nested_items(value):
             continue
         if isinstance(value, (dict, list)):
             continue
-        metadata[key] = _clean_value(value)
+        metadata[key] = _sanitize_for_excel(_clean_value(value))
     return metadata
 
 
@@ -76,7 +114,7 @@ def _extract_nested_rows(
     for item in raw_items:
         row = metadata.copy()
         for key, val in item.items():
-            row[key] = _clean_value(val)
+            row[key] = _sanitize_for_excel(_clean_value(val))
         rows.append(row)
     return rows
 
@@ -86,7 +124,7 @@ def _discover_nested_columns(records: list[dict[str, Any]]) -> list[str]:
     nested_columns: set[str] = set()
     for record in records:
         for key, value in record.items():
-            if _parse_nested_items(value):
+            if isinstance(value, list):
                 nested_columns.add(key)
     return sorted(nested_columns)
 
@@ -131,7 +169,7 @@ def convert_json_to_excel(input_file: Path, output_file: Path) -> None:
     sheets: dict[str, list[dict[str, Any]]] = {col: [] for col in nested_columns}
 
     with Progress(
-        TextColumn("[bold green]Extracting data"),
+        TextColumn(EXCEL_PROGRESS_DESCRIPTION),
         BarColumn(),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
@@ -150,9 +188,11 @@ def convert_json_to_excel(input_file: Path, output_file: Path) -> None:
         with pd.ExcelWriter(output_file, engine=EXCEL_ENGINE) as writer:
             sheets_written = 0
             for sheet_name, data in sheets.items():
-                if not data:
-                    continue
-                df = _sort_columns(pd.DataFrame(data))
+                df = _sort_columns(pd.DataFrame(data if data else []))
+                # Sanitize all string values in the DataFrame
+                for col in df.columns:
+                    if df[col].dtype == "object":
+                        df[col] = df[col].apply(_sanitize_for_excel)
                 safe_name = sheet_name[:EXCEL_SHEET_NAME_MAX_LENGTH]
                 df.to_excel(writer, sheet_name=safe_name, index=False)
                 sheets_written += 1

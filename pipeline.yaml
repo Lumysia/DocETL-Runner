@@ -1,4 +1,4 @@
-# Example DocETL Pipeline Template
+# Example DocETL pipeline template
 #
 # This template uses placeholders that are automatically replaced at runtime:
 #   {{INPUT_JSON}}       - Path to the generated input JSON file
@@ -7,44 +7,25 @@
 #
 # Usage:
 #   python main.py <input_folder> -p pipeline_template.yaml -o output.json
+#
+# Optional environment variables:
+#   DOCETL_DEFAULT_MODEL - override the pipeline model name
+#   DOCETL_REWRITE_MODEL - override the optimizer rewrite model
+#   DOCETL_VALIDATE_RETRIES - override validation retry count
 
 from_docwrangler: true
 parsing_tools:
   - name: docling_pdf_to_markdown
     function_code: |
-      import os
-      from pathlib import Path
-      from threading import Lock
-
-      import huggingface_hub.file_download as hf_file_download
-      from docling.document_converter import DocumentConverter
-
-      _DOCLING_CONVERTER = None
-      _DOCLING_LOCK = Lock()
-      _ORIGINAL_SYMLINK = getattr(hf_file_download.os, "symlink", None)
-
-      if os.name == "nt" and _ORIGINAL_SYMLINK is not None:
-          def _safe_symlink(src, dst, *args, **kwargs):
-              try:
-                  return _ORIGINAL_SYMLINK(src, dst, *args, **kwargs)
-              except OSError as exc:
-                  if getattr(exc, "winerror", None) == 1314:
-                      raise PermissionError("Symlink privilege not available on Windows") from exc
-                  raise
-
-          hf_file_download.os.symlink = _safe_symlink
-
       def docling_pdf_to_markdown(document, input_key="pdf_path", output_key="docling_markdown", strict_text=False):
-          global _DOCLING_CONVERTER
-          if input_key not in document:
-              raise ValueError(f"Input key {input_key} not found in item: {document}")
+          from docetl_runner.docling import docling_pdf_to_markdown as _shared_docling_pdf_to_markdown
 
-          with _DOCLING_LOCK:
-              if _DOCLING_CONVERTER is None:
-                  _DOCLING_CONVERTER = DocumentConverter()
-
-              result = _DOCLING_CONVERTER.convert(Path(document[input_key]))
-          return [{output_key: result.document.export_to_markdown(strict_text=strict_text)}]
+          return _shared_docling_pdf_to_markdown(
+              document,
+              input_key=input_key,
+              output_key=output_key,
+              strict_text=strict_text,
+          )
 
 datasets:
   input:
@@ -56,16 +37,16 @@ datasets:
         input_key: pdf_path
         output_key: docling_markdown
 
-default_model: openrouter/google/gemini-3-flash-preview
+default_model: ${DOCETL_DEFAULT_MODEL:-openrouter/google/gemini-3-flash-preview}
 optimizer_config:
-  rewrite_agent_model: gpt-5-nano
+  rewrite_agent_model: ${DOCETL_REWRITE_MODEL:-gpt-5-nano}
 
 operations:
   - type: map
-    name: extract_document_profile
+    name: extract_structured_document_data
     skip_on_error: true
     prompt: |
-      You are extracting structured metadata from a document.
+      You are extracting structured information from a document.
 
       Source file: {{ input.filename }}
 
@@ -75,13 +56,14 @@ operations:
 
       Task:
 
-      Extract the following structured fields:
+      Extract the following fields:
 
       1) title
       2) document_id
-      3) summary
-      4) keywords
-      5) entities
+      3) document_type
+      4) summary
+      5) key_points
+      6) entities
 
       Extraction rules:
 
@@ -89,14 +71,15 @@ operations:
       - Do not guess missing values.
       - For unknown scalar values, return null.
       - For unknown list fields, return an empty list.
-      - Preserve wording as closely as possible when capturing keywords or entities.
+      - Preserve wording as closely as possible when capturing key points or entities.
 
       Field requirements:
 
       - title: best available document title
       - document_id: DOI, report number, accession number, or another explicit identifier if present
+      - document_type: paper, report, manual, policy, slide deck, or another explicit type when stated or strongly evident from the document
       - summary: concise 2-4 sentence summary grounded in the source text
-      - keywords: a list of key topics or phrases explicitly mentioned in the document
+      - key_points: a list of the most important explicit findings, claims, sections, or takeaways from the document
       - entities: a list of objects with name, type, and provenance
 
       Output rules:
@@ -108,14 +91,15 @@ operations:
       schema:
         title: string
         document_id: string
+        document_type: string
         summary: string
-        keywords: 'list[string]'
+        key_points: 'list[string]'
         entities: 'list[{name: string, type: string, provenance: string}]'
     optimize: 'true'
-    num_retries_on_validate_failure: 2
-    model: openrouter/google/gemini-3-flash-preview
+    num_retries_on_validate_failure: ${DOCETL_VALIDATE_RETRIES:-2}
+    model: ${DOCETL_DEFAULT_MODEL:-openrouter/google/gemini-3-flash-preview}
   - type: map
-    name: normalize_document_profile
+    name: normalize_structured_document_data
     prompt: |
       You are a data normalization assistant.
 
@@ -125,35 +109,38 @@ operations:
 
       Document ID: {{ input.document_id }}
 
+      Document Type: {{ input.document_type }}
+
       Summary: {{ input.summary }}
 
-      Keywords: {{ input.keywords }}
+      Key Points: {{ input.key_points }}
 
       Entities: {{ input.entities }}
 
       Task:
 
       - Clean whitespace in string fields.
-      - Remove duplicate keywords while preserving order.
+      - Remove duplicate key points while preserving order.
       - Remove duplicate entities when both name and type are identical.
       - Keep provenance text unchanged.
     output:
       schema:
         title: string
         document_id: string
+        document_type: string
         summary: string
-        keywords: 'list[string]'
+        key_points: 'list[string]'
         entities: 'list[{name: string, type: string, provenance: string}]'
-    input: extract_document_profile
-    model: openrouter/google/gemini-3-flash-preview
+    input: extract_structured_document_data
+    model: ${DOCETL_DEFAULT_MODEL:-openrouter/google/gemini-3-flash-preview}
 
 pipeline:
   steps:
     - name: data_processing
       input: input
       operations:
-        - extract_document_profile
-        - normalize_document_profile
+        - extract_structured_document_data
+        - normalize_structured_document_data
 
   output:
     type: file

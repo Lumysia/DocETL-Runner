@@ -1,12 +1,16 @@
 """Pipeline template resolution and DocETL execution."""
 
 import logging
+import os
 from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from docetl_runner.constants import (
+    DEFAULT_WINDOWS_UTF8_ENV_VARS,
     FILE_ENCODING,
+    PATH_DISPLAY_SEPARATOR,
+    PIPELINE_PROGRESS_DESCRIPTION,
     TEMPLATE_PLACEHOLDER_INPUT,
     TEMPLATE_PLACEHOLDER_INTERMEDIATE,
     TEMPLATE_PLACEHOLDER_OUTPUT,
@@ -15,9 +19,20 @@ from docetl_runner.constants import (
 logger = logging.getLogger(__name__)
 
 
+def configure_runtime_environment() -> None:
+    for name, value in DEFAULT_WINDOWS_UTF8_ENV_VARS:
+        if os.environ.get(name) != value:
+            os.environ[name] = value
+            logger.debug("Set runtime environment %s=%s", name, value)
+
+
 def _posix_str(path: Path) -> str:
     """Convert a Path to a forward-slash string suitable for YAML."""
-    return str(path).replace("\\", "/")
+    return (
+        path.as_posix()
+        if hasattr(path, "as_posix")
+        else str(path).replace("\\", PATH_DISPLAY_SEPARATOR)
+    )
 
 
 def resolve_template(
@@ -76,6 +91,8 @@ def run_pipeline(pipeline_yaml_path: Path) -> None:
         ImportError: ``docetl`` is not installed.
         RuntimeError: Pipeline execution failed.
     """
+    configure_runtime_environment()
+
     try:
         from docetl.runner import DSLRunner
     except ImportError as exc:
@@ -87,14 +104,16 @@ def run_pipeline(pipeline_yaml_path: Path) -> None:
 
     with Progress(
         SpinnerColumn(),
-        TextColumn("[bold blue]Running pipeline…"),
+        TextColumn(PIPELINE_PROGRESS_DESCRIPTION),
         TimeElapsedColumn(),
-        transient=True,
+        transient=False,
+        console=None,
     ) as progress:
-        progress.add_task("pipeline", total=None)
+        task = progress.add_task("pipeline", total=None)
         try:
             runner = DSLRunner.from_yaml(str(pipeline_yaml_path))
             runner.load_run_save()
+            progress.update(task, completed=1, total=1)
         except Exception as exc:
             raise RuntimeError(f"Pipeline execution failed: {exc}") from exc
 

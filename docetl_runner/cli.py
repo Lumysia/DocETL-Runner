@@ -2,6 +2,16 @@
 
 import argparse
 
+from docetl_runner.constants import (
+    CLI_BATCH_HELP_TEMPLATE,
+    CLI_DEFAULT_OUTPUT_TEMPLATE,
+    CLI_EXAMPLE_INPUT_FOLDER,
+    CLI_EXAMPLE_PIPELINE_TEMPLATE,
+    TEMPLATE_PLACEHOLDER_INPUT,
+    TEMPLATE_PLACEHOLDER_INTERMEDIATE,
+    TEMPLATE_PLACEHOLDER_OUTPUT,
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct and return the argument parser."""
@@ -10,11 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python -m docetl_runner input_docs -p pipeline_template.yaml\n"
-            "  python -m docetl_runner input_docs "
-            "-p pipeline_template.yaml -o output.json\n"
-            "  python -m docetl_runner input_docs "
-            "-p pipeline_template.yaml -e results.xlsx\n"
+            "  python -m docetl_runner "
+            f"{CLI_EXAMPLE_INPUT_FOLDER} -p {CLI_EXAMPLE_PIPELINE_TEMPLATE}\n"
+            f"  python -m docetl_runner {CLI_EXAMPLE_INPUT_FOLDER} "
+            f"-p {CLI_EXAMPLE_PIPELINE_TEMPLATE} -o output.json\n"
+            f"  python -m docetl_runner {CLI_EXAMPLE_INPUT_FOLDER} "
+            f"-p {CLI_EXAMPLE_PIPELINE_TEMPLATE} -e results.xlsx\n"
         ),
     )
 
@@ -30,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         required=True,
         help=(
-            "Pipeline YAML template file; must contain {{INPUT_JSON}}, "
-            "{{OUTPUT_FILE}}, and {{INTERMEDIATE_DIR}}"
+            f"Pipeline YAML template file; must contain {TEMPLATE_PLACEHOLDER_INPUT}, "
+            f"{TEMPLATE_PLACEHOLDER_OUTPUT}, and {TEMPLATE_PLACEHOLDER_INTERMEDIATE}"
         ),
     )
 
@@ -40,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=str,
         default=None,
-        help="Output JSON file path (default: <input_folder>_output.json)",
+        help=f"Output JSON file path (default: {CLI_DEFAULT_OUTPUT_TEMPLATE})",
     )
 
     parser.add_argument(
@@ -59,6 +70,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Enable debug logging",
+    )
+
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        default=False,
+        help="Disable automatic summary generation after pipeline execution",
+    )
+
+    parser.add_argument(
+        "-b",
+        "--batch-size",
+        type=int,
+        default=None,
+        help=CLI_BATCH_HELP_TEMPLATE,
+    )
+
+    parser.add_argument(
+        "--docling-threads",
+        type=int,
+        default=None,
+        help="Override Docling CPU thread count for PDF parsing",
     )
 
     return parser
